@@ -1,0 +1,151 @@
+---
+title: "Data Manipulation and Visualization with dplyr and ggplot2"
+author: "Tarek Dib"
+date: "December 31, 2015"
+output: html_document
+---
+
+## Loading Libraries and Reading Data
+```{r}
+library(lubridate)
+library(dplyr)
+library(ggplot2)
+library(mapproj)
+library(maps)
+library(ggmap)
+# Load the rjsonlite library. The fromJSON function will convert the json file into a data frame. The data set includes only 1000 observations, and is the one use to illustrate the use of dplyr for data manipulation and processing.
+library(jsonlite)
+json_file <- "https://data.sfgov.org/resource/cuks-n6tp.json"
+crimes <- fromJSON(json_file, flatten = T)
+# The bigger data set used to create San Francisco District map. The number of rows of the data set is a little more than 300000 rows.
+setwd("/home/hduser/DataWrangling")
+SF_Crimes <- read.csv("SFCrimes.csv")
+# Convert x and y to numeric
+crimes$x <- as.numeric(crimes$x)
+crimes$y <- as.numeric(crimes$y)
+```
+
+## Data Manipulation
+```{r}
+# Summarize the data frame using tbl. tbl is just a special kind of data.frame. They make your data easier to look at, but also easier to work with. On top of this, it is straightforward to derive a tbl from a data.frame structure.
+crimes_tbl <- tbl_df(crimes)
+# Or glimpse function
+glimpse(crimes_tbl)
+```
+
+
+```{r}
+# Crimes committed on weekends using filter function in dplyr
+weekendCrimes <- crimes_tbl %>% 
+                      filter(dayofweek == "Saturday" | dayofweek == "Sunday") %>%
+                      arrange(date)
+# Crimes committed on weekdays
+weekdaysCrimes <- filter(crimes_tbl, dayofweek %in% c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday"))
+
+#Select a subset of the data 
+crimes_subset <- crimes_tbl %>% 
+                        select(category, dayofweek, time, address)
+
+# Aggregate crimes by category and filter for crimes that occured more often from February 1, 2016 to June 18, 2015. Then sort the data in descending order of crimes count 
+category_grp <- crimes_tbl %>%
+                      group_by(category) %>%
+                      summarize(category_count=n()) %>%
+                      filter(category_count > 15) %>%
+                      arrange(desc(category_count))
+# Convert to normal data frame
+category_df <- data.frame(category_grp)
+
+# Group by category and district. Count the number of crimes in each district and category. filter to only crimes that occur more than 5 times in each district, category group. Finally sort the data in descending order
+category_dist <- crimes_tbl %>%
+                        group_by(category, pddistrict) %>%
+                        summarize(n = n()) %>%
+                        filter(n > 2) %>%
+                        arrange(desc(n))
+# Convert to regular data frame 
+cat_dist_df <- data.frame(category_dist)
+# Sort in descending order of number of crimes in each district and category
+cate_dist <- cat_dist_df %>%
+                      arrange(desc(n))
+# Choose the top 10 crimes
+crimes_top10 <- head(cate_dist,10)
+crimes_top10
+
+# Crimes by day of week in each district
+crimes_day <- crimes_tbl %>%
+                    group_by(pddistrict, dayofweek) %>%
+                    summarise(crimes_count = n()) %>%
+                    arrange(desc(crimes_count))
+# Convert to a regular data frame
+crimes_day_df <- data.frame(crimes_day)
+# Order by crimes_count. Return only days in which 5 or more crimes take place
+crimes_day_df1 <- crimes_day_df %>%
+                            arrange(desc(crimes_count)) %>%
+                            filter(crimes_count > 4)
+# Create a data frame in which crimes are grouped by average number of crimes occuring each day in all districts
+crimes_day_avg <- crimes_day %>% 
+  group_by(dayofweek) %>% 
+  summarise(avg_crimes = round(mean(crimes_count))) %>% 
+  arrange(desc(avg_crimes))
+crimes_day_avg <- data.frame(crimes_day_avg)
+
+# Since date column is a character vector, we shall convert it to Date() type vector
+crimes_tbl$date <- as.Date(crimes_tbl$date)
+# Total daily crimes
+crimes_daily <- crimes_tbl %>% 
+                group_by(date, pddistrict) %>%
+                summarise(daily_count = n()) %>%
+                filter(daily_count > 5)
+crimes_daily_df <- data.frame(crimes_daily)
+```
+
+## San Francisco Crime Sites
+```{r map, fig.width=12, fig.height=10}
+qmplot(X, Y, data = SF_Crimes, size = I(4), alpha = I(0.8), color=PdDistrict) +
+  ggtitle("San Francisco Crime Sites")
+```
+
+## Crimes Grouped by Category
+```{r crimes by category, fig.width=12, fig.height=10}
+p <- ggplot(category_df, aes(x = reorder(factor(category), -category_count),  y=category_count, fill=category))
+p + geom_bar(stat="identity") +
+    theme(axis.text.x = element_blank(), axis.ticks=element_blank(), 
+            axis.title.x=element_blank()) + 
+    ggtitle("Top Crimes Grouped by Category in the City of San Francisco\n February 1, 2015 to June 18, 2015") +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1), legend.position = "none") +
+    ylab("Number of Crimes in Each Category")
+```
+
+## Crimes Grouped by Category in Each District
+```{r crimes by category_district, fig.width=12, fig.height=10}
+plt <- ggplot(crimes_top10, aes(x = category, y=n, fill = pddistrict))
+plt + geom_bar(stat = "identity") + 
+  labs(x = "District", y = "Number of Crimes", 
+       title = "Number of Crimes grouped by Category in Each District") +
+  scale_fill_discrete(name = "Disttrict")
+```
+
+## Total Number of Crimes Grouped by Day of Week
+```{r days with most crimes, fig.width=12, fig.height=10}
+pdays <- ggplot(crimes_day, aes(x = factor(dayofweek, levels = c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")), y=crimes_count, fill = pddistrict))
+pdays + geom_bar(stat = "identity") + 
+  labs(x = "", y="Number of Crimes", title = "Total Number of crimes each day of the week in Each District")
+# Let's check which district has the most crimes each day
+pdays + geom_bar(stat = "identity", position = "dodge") + 
+  labs(x = "", y="Number of Crimes", title = "Total Number of crimes each day of the week in Each District")
+```
+
+## Daily Average Number of Crimes in all Districts
+```{r average, fig.width=12, fig.height=10}
+avg <- ggplot(crimes_day_avg, aes(x=factor(dayofweek, levels = c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")), y=avg_crimes))
+avg + geom_bar(stat="identity", fill = "blue") + xlab(" ") + theme_grey() +
+  labs(y = "Daily Average Number of Crimes", title="Daily total average Number of Crimes in all the Districts")
+'To change the background color, one could use theme(panel.background = element_rect(fill = "green"", colour = "red"")) for example. To change the color of the plot (but not the color of the panel), use this theme(plot.background = element_rect(fill = "green"", colour = "red"")) instead for example.'
+```
+
+## Total Number of Crimes grouped by Date
+```{r, fig.width=12, fig.height=10}
+ggplot(data=crimes_daily_df, aes(x=date, y=daily_count, fill = pddistrict)) + geom_histogram(stat = "identity") +
+  scale_fill_discrete(name = "District") +
+  labs(x = "Date", y = "Number of Crimes", title = "Number of Crimes grouped by Date in each District")
+```
+

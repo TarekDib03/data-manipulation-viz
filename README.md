@@ -1,1 +1,0 @@
-# Data Manipulation and Visualization of San Francisco Crimes using dplyr and ggplot2 developed by Hadley Wickham. In addition, ggmap, maps and mapproj are used to create a map of San Francisco crime sites.
